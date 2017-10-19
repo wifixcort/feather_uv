@@ -20,8 +20,16 @@ float lecturas_V_sensor_UV(){//Las lecturas deben retornarse en Volts
     es lineal al indice UV
   */
   //Se realizará un muestreo de la señal entrante para tener una mejor aproximación
-  float sensor_uv = analogRead(A2);
-  return sensor_uv;
+  long sensor_uv = 0;
+  long  sum = 0;
+  for(int i = 0; i < 1024; i++){  
+    sensor_uv += analogRead(A0);//Tomar nueva medición del sensor y sumarla para crear un promedio
+    delay(2);
+  }//end for
+  sensor_uv /= 1024;//Tomar las mediciones y dividirlas entre el total de mediciones
+  float sensor_en_V = sensor_uv*(3/1024.0);//Voltage del sensor en V
+  
+  return sensor_en_V;//Retorna el valor en V
 }//end lecturas_mV_sensor_uv
 
 unsigned int indice_UV(float lectura_V){
