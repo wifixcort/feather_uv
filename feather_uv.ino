@@ -93,15 +93,27 @@ void setup() {
 
 void loop() {
   Watchdog.reset();//Siempre reinicar al inicio o al final de cada loop el watchdog
-  
-  float lecturas_Volts = lecturas_V_sensor_UV();
-  unsigned int indice = indice_UV(lecturas_Volts);
-  Serial.println(indice);
-  delay(1000);//Esperar un segundo hasta la siguiente medición
+
+  //TODO Crear método para enviar las mediciones con estos datos a MQTT
+//  float lecturas_Volts = lecturas_V_sensor_UV();
+//  unsigned int indice = indice_UV(lecturas_Volts);
+//  Serial.print(F("Indice de radiación UV = "));
+//  Serial.println(indice);
+//  delay(1000);//Esperar un segundo hasta la siguiente medición
 
   MQTT_connect();
-  log_battery_percent(80, feather_battery_feed);//Tratar de enviar el mensaje por MQTT
-//  alarma1_enviar_bateria(millis(), 1000);//Actualizar Adafruit feeds cada 1s
+  //Envío de prueba para verificar que se puede realizar la conexión a io.adadfruit.com
+  //log_battery_percent(80, feather_battery_feed);//Tratar de enviar el mensaje por MQTT
+
+  //La conexión debe temporizarse para no saturar el sitio de mensajes de forma inncesaria
+  alarma1_enviar_bateria(millis(), 60000);//Actualizar Adafruit feeds cada 60s
+
+  if(conteo_de_fallos >= MAXFALLOS){
+    //Se llegó a la máxima cantidad de fallos por lo que se bloqueará el programa
+    //de esta forma el Watchdog entrará en acción y reiniciará nuestro programa
+    //para solucionar cualquier problema de conexión
+    while(1);
+  }//end if
   
 }//end loop
 
@@ -123,7 +135,7 @@ float lecturas_V_sensor_UV(){//Las lecturas deben retornarse en Volts
   return sensor_en_V;//Retorna el valor en V
 }//end lecturas_mV_sensor_uv
 
-unsigned int indice_UV(float &lectura_V){//El valor se envia por referencia para no utilizar más\
+unsigned int get_indice_UV(float &lectura_V){//El valor se envia por referencia para no utilizar más\
                                          memoria de la necesaria
   /*Conversión aproximada para determinar el indice UV que incide sobre el sensor.
     El indice UV se puede aproximar mediante la expresión UV = (307*lectura_V)/200
@@ -134,30 +146,18 @@ unsigned int indice_UV(float &lectura_V){//El valor se envia por referencia para
 
   float indice_uv_crudo = (307*lectura_V)/200;
 
-  unsigned int indice_uv = round(indice_uv_crudo);
+  unsigned int indice_uv = round(indice_uv_crudo);//Valor entero del indice UV
   
   return indice_uv;
 }//end indice
+
+void log_indice_uv(){}
 
 int get_fona_battery(void){//Leer el porcentaje de la batería restante
   uint16_t vbat;
   fona.getBattPercent(&vbat);
   return vbat;
 }//end get_fona_battery
-
-
-void log_battery_percent(uint32_t indicador, Adafruit_MQTT_Publish& publishFeed){// Log battery
-    Serial.print(F("Publicando porcentaje de batería: "));
-    Serial.println(indicador);
-  if(!publishFeed.publish(indicador)){
-    Serial.println(F("Publicación fallida!"));
-    conteo_de_fallos++;
-  }else{
-    Serial.println(F("Publicación OK!"));
-    conteo_de_fallos = 0;
-  }//end if
-}//end log_battery_percent
-
 
 void alarma1_enviar_bateria(uint32_t timer, uint32_t interval){
     uint16_t fona_battery = get_fona_battery();//Tomar una medición reciente de la batería
@@ -166,10 +166,22 @@ void alarma1_enviar_bateria(uint32_t timer, uint32_t interval){
     para ahorar espacio, ya que este es limitado al igual que la cantidad de envíos a adafruit
     if((fona_battery != ultima_medicion_de_bateria) && (fona_battery != 0)){
       ultima_medicion_de_bateria = fona_battery;//Actualizar al último valor de batería 
-      log_battery_percent(fona_battery, feather_battery_feed);//Tratar de enviar el mensaje por MQTT
+      Serial.print(F("Publicando porcentaje de batería: "));
+      Serial.println(fona_battery);
+      log_to_mqtt(fona_battery, feather_battery_feed);//Tratar de enviar el mensaje por MQTT
     }//end if
     previousMillis_1 = timer;
 }//end temporizer
+
+void log_to_mqtt(uint32_t indicador, Adafruit_MQTT_Publish& publishFeed){// Log battery
+  if(!publishFeed.publish(indicador)){
+    Serial.println(F("Publicación fallida!"));
+    conteo_de_fallos++;
+  }else{
+    Serial.println(F("Publicación OK!"));
+    conteo_de_fallos = 0;
+  }//end if
+}//end log_battery_percent
 
 
 //Método creado por Adafruit
