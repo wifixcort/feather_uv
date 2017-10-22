@@ -29,11 +29,11 @@ Adafruit_MQTT_FONA mqtt(&fona, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY
 //Líneas de confuguración para el archivo fonahelper.cpp proporcionado por Adafruit
 
 // You don't need to change anything below this line!
-#define halt(s) { Serial.println(F( s )); while(1);  }
+//#define halt(s) { Serial.println(F( s )); while(1);  }
 
 // FONAconnect is a helper function that sets up the FONA and connects to
 // the GPRS network. See the fonahelper.cpp tab above for the source!
-boolean FONAconnect(const __FlashStringHelper *apn, const __FlashStringHelper *username, const __FlashStringHelper *password);
+//boolean FONAconnect(const __FlashStringHelper *apn, const __FlashStringHelper *username, const __FlashStringHelper *password);
 
 /****************************** Feeds ***************************************/
 //Declaración y inicialización de los feeds que serán enviados por MQTT a io.adafruit.com
@@ -52,6 +52,8 @@ uint8_t conteo_de_fallos = 0;
 
 #define MAXFALLOS 5 //Cantidad máxima de fallos que vamos a permitir antes de reiniciar el sistema
 
+#define NETOWRK_CONCT_TRY 40 //No intentar más de 40 veces una reconexion de GPRS
+
 //Últimos valores de la batería y el sensor UV
 uint16_t ultima_medicion_de_bateria;
 
@@ -63,7 +65,9 @@ uint32_t previousMillis_2 = 0;//Actualizar tiempo de último envío de indice UV
 uint32_t previousMillis_3 = 0;//Actualizar tiempo de último envío de indice UV
 
 uint8_t led_conexion_mqtt = 13;
-uint8_t estado_conexion_mqtt = 0;
+//uint8_t estado_conexion_mqtt = 0;
+
+void little_blink(int16_t t_delay, uint8_t num_blink = 4);
 
 void setup() {
   
@@ -78,45 +82,21 @@ void setup() {
 
   pinMode(led_conexion_mqtt, OUTPUT);
 
-  //Un watchdog es un circuito aparte dentro del microncontrolador que verifica que nuestro\
-  programa se encuentre corriende, si por algún motivo nuestro programa se detiene, este circuito\
-  reiniciará nuestro microcontrolador ya que esto indica una posible falla. Por lo que su\
-  contador debe reiniciarse cada 8s como máximo
+  /*Un watchdog es un circuito aparte dentro del microncontrolador que verifica que nuestro
+  programa se encuentre corriende, si por algún motivo nuestro programa se detiene, este circuito
+  reiniciará nuestro microcontrolador ya que esto indica una posible falla. Por lo que su
+  contador debe reiniciarse cada 8s como máximo*/
 
-  Watchdog.enable(8000);
-  Watchdog.reset();//Reiniciamos el Watchdog para ya que si sobrepasa los 8s reinicia el programa\
-                    y estamos por esperar 5s, debemos asegurarnos de poder esperar ese tiempo
   delay(5000);  //Se debe esperar unos momentos a que el SIM800 se estabilize
-  Watchdog.reset();//Reiniciamos nuevamente el tiempo para poder continuar con el flujo del programa
 
   little_blink(150);//Indicador de inicio
-  conexion_fona_kolbi();
-
-  Serial.println(F("Connected to Cellular!"));
+  
+  iniciar_FONA();
   
 }//end setup
 
 void loop() {
-  Watchdog.reset();//Siempre reinicar al inicio o al final de cada loop el watchdog
-
-  MQTT_connect();
-  //Envío de prueba para verificar que se puede realizar la conexión a io.adadfruit.com
-  //log_battery_percent(80, feather_battery_feed);//Tratar de enviar el mensaje por MQTT
   
-  if(conteo_de_fallos >= MAXFALLOS){
-    //Se llegó a la máxima cantidad de fallos por lo que se bloqueará el programa
-    //de esta forma el Watchdog entrará en acción y reiniciará nuestro programa
-    //para solucionar cualquier problema de conexión
-    Watchdog.enable(100);
-    Watchdog.reset();
-    while(1);//Este loop infinito correrá durante 100ms y el programa se reiniciará
-  }//end if
-
-  if(estado_conexion_mqtt){
-    digitalWrite(led_conexion_mqtt, HIGH);
-    delay(500);
-  }
-
   //La conexión debe temporizarse para no saturar el sitio de mensajes de forma inncesaria
   alarma1_enviar_bateria(millis(), 60000);//Actualizar Adafruit feeds cada 60s
   alarma2_enviar_indice_uv(millis(), 60000);//Actualizar Adafruit feeds cada 60s
@@ -124,6 +104,8 @@ void loop() {
   
 }//end loop
 
+//===============================================================
+//===============================================================
 //===============================================================
 
 float lecturas_V_sensor_UV(){//Las lecturas deben retornarse en Volts
@@ -160,13 +142,13 @@ unsigned int get_indice_UV(float &lectura_V){//El valor se envia por referencia 
   return indice_uv;
 }//end indice
 
-int get_fona_battery(void){//Leer el porcentaje de la batería restante
+int get_fona_battery(){//Leer el porcentaje de la batería restante
   uint16_t vbat;
   fona.getBattPercent(&vbat);
   return vbat;
 }//end get_fona_battery
 
-int8_t get_network_asu(void){
+int8_t get_network_asu(){
   //Arbitrary Strength Unit (ASU) is an integer value proportional to the received signal strength measured by the mobile phone.
   uint8_t asu = fona.getRSSI();
 
@@ -191,11 +173,14 @@ int8_t get_network_asu(void){
 }//end get_network_asu
 
 //===============================================================
+  //En cuanto a las alarmas cada tiempo definido por la variable interval estos método ejecutará su código \
+  de otra forma no ejecutará nada evitando perder tiempo de forma innecesaria
 
 void alarma1_enviar_bateria(uint32_t timer, uint32_t interval){
   if(timer - previousMillis_1 > interval) {
+    Serial.println(F("Alarma #1"));
+    verificador_de_conexion();//Antes de iniciar verificar todas las conexiones se encuentran en orden    
     uint16_t fona_battery = get_fona_battery();//Tomar una medición reciente de la batería
-
     //Se verificará si el porcentaje es igual al último enviado, de ser así no se enviará nuevamente\
     para ahorar espacio, ya que este es limitado al igual que la cantidad de envíos a adafruit
     if((fona_battery != ultima_medicion_de_bateria) && (fona_battery != 0)){
@@ -220,30 +205,26 @@ void alarma1_enviar_bateria(uint32_t timer, uint32_t interval){
 
 void alarma2_enviar_indice_uv(uint32_t timer, uint32_t interval){
   if(timer - previousMillis_2 > interval) {
+    Serial.println(F("Alarma #2"));    
+    verificador_de_conexion();//Antes de iniciar verificar todas las conexiones se encuentran en orden
     float lecturas_Volts = lecturas_V_sensor_UV();
     unsigned int uv_index = get_indice_UV(lecturas_Volts);
-//    if((uv_index != ultima_medicion_uv) && (uv_index != 0)){//El indice inicia en 1 por lo que no se\
-                                                              enviaran valores menores a 1
-      Serial.print(F("Publicando Indice de radiación UV: "));
-      Serial.println(uv_index);
-      int verificacion_envio = log_to_mqtt(uv_index, uv_index_feed);
-      //Si el envío no se realiza siempre voy a querer que cuando se vuelva a intentar realizar el envío
-      //el valor anterior y el nuevo valor no sean iguales para así enviarlo
-      if(verificacion_envio == EXIT_FAILURE){
-        ultima_medicion_uv = 0;
-      }//end if
-//    }else{
-//      //Esta línea se utilizará únicamente para propósitos de información
-//      char buffer[60];
-//      sprintf(buffer, "Medición duplicada UV: %i, no hay cambios", uv_index);
-//      Serial.println(buffer);
-//    }//end if
+    Serial.print(F("Publicando Indice de radiación UV: "));
+    Serial.println(uv_index);
+    int verificacion_envio = log_to_mqtt(uv_index, uv_index_feed);
+    //Si el envío no se realiza siempre voy a querer que cuando se vuelva a intentar realizar el envío
+    //el valor anterior y el nuevo valor no sean iguales para así enviarlo
+    if(verificacion_envio == EXIT_FAILURE){
+      ultima_medicion_uv = 0;
+    }//end if
     previousMillis_2 = timer;
   }//end if
 }//end alarma2_enviar_indice_uv
 
 void alarma3_enviar_asu_signal(uint32_t timer, uint32_t interval){
   if(timer - previousMillis_3 > interval) {
+    Serial.println(F("Alarma #3"));    
+    verificador_de_conexion();//Antes de iniciar verificar todas las conexiones se encuentran en orden
     int32_t feather_asu_signal = get_network_asu();
     Serial.print(F("Publicando señal ASU: "));
     Serial.println(feather_asu_signal);
@@ -269,101 +250,166 @@ unsigned int log_to_mqtt(int32_t indicador, Adafruit_MQTT_Publish& publishFeed){
 }//end log_battery_percent
 
 void MQTT_connect(){
-  /* Function to connect and reconnect as necessary to the MQTT server.
- Should be called in the loop function and it will take care if connecting.*/
+  //Esta funcion permite la conexion y reconexión a MQTT en caso de problemas de RED
   int8_t connection_status;
-  // Stop if already connected.
-  if (mqtt.connected()){
-    estado_conexion_mqtt = 1;
+
+  if (mqtt.connected()){//Salir si ya se está conectado a MQTT
     return;
   }//end if
 
-  if(!estado_conexion_mqtt){
-    digitalWrite(led_conexion_mqtt, LOW);
-  }//end if
-
+  //Si la ejecuacion llega hasta acá tenemos problemas de conexión
+  digitalWrite(led_conexion_mqtt, LOW);//Apagar el LED
   
   Serial.print("Connecting to MQTT... ");
 
-  for(uint8_t i = 0; i < 10; i++){//Arbitrary elected 10 times
-    if(estado_de_red == EXIT_FAILURE){
-      Watchdog.reset();
-      conexion_fona_kolbi();
-      Watchdog.reset();  
-    }//end if
-    if((connection_status = mqtt.connect()) == 0){//connect will return 0 for connected
-        Serial.println("MQTT Connected!");
-        estado_conexion_mqtt = 1;
-        conteo_de_fallos = 0;
-      break;
+  for(uint8_t i = 0; i < 10; i++){//Se elegió intentar intentar un máximo de 10, de forma arbitraria\
+                                    puede aumentarse o disminuirse a gusto    
+    if((connection_status = mqtt.connect()) == 0){//Si se está conextado a la red
+      Serial.println("MQTT Connected!");
+      digitalWrite(led_conexion_mqtt, HIGH);
+      conteo_de_fallos = 0;//Reiniciar la cantidad de fallos
+      break;//Ya no es necesario continuar en el "for" porque ya estamos conectados
     }else{
       Serial.println(mqtt.connectErrorString(connection_status));
       Serial.println("Retrying MQTT connection in 5 seconds...");
       mqtt.disconnect();
-      little_blink(500);//Indicador de que tendrá que reintentar conectarse a MQTT
-      estado_conexion_mqtt = 0;
+      little_blink(250, 20);//Indicador de que tendrá que reintentar conectarse a MQTT
       conteo_de_fallos++;
-      Watchdog.reset();
-      delay(5000); // wait 5 seconds
+//      delay(5000); // wait 5 seconds
     }//end if
   }//end for
 }//end MQTT_connect
 
+void verificador_de_conexion(){
+  if(estado_de_red() == EXIT_FAILURE){//Verificar si estamos conectados a la RED Kolbi
+    Serial.println(F("Problemas de conexion de red, reconectando..."));
+    digitalWrite(led_conexion_mqtt, LOW);
+    conexion_fona_kolbi();
+  }//end if  
+  if(!fona.GPRSstate()){//Verificar el estado de GPRS
+    Serial.println(F("Problemas de señal de GPRS"));
+    digitalWrite(led_conexion_mqtt, LOW);//Estamos claramente desconectados de MQTT apagamos el LED
+    Serial.println(F("Desabilitando GPRS"));
+    fona.enableGPRS(false);
+    delay(5000);//Esperar unos segundos para que la conexión se estabilice
+    Serial.println(F("Habilitando GPRS"));
+    if (!fona.enableGPRS(true)) {
+      Serial.println(F("Failed to turn GPRS on"));  
+      reboot(F("ERROR GPRS. es necesario reiniciar"));
+    }//end if
+  }//end if
+  if(!fona.TCPconnected()){//Si no se tiene conexión por TCP no estaremos conectados a MQTT
+    Serial.println(F("Fallo de conexión a MQTT, reconectando..."));
+    MQTT_connect();//Reconectar a MQTT
+  }//end if
+  if(conteo_de_fallos >= MAXFALLOS){
+    //Se llegó a la máxima cantidad de fallos por lo que se bloqueará el programa
+    //de esta forma el Watchdog entrará en acción y reiniciará nuestro programa
+    //para solucionar cualquier problema de conexión    
+    reboot(F("Máxima cantidad de fallos al enviar a MQTT"));
+  }//end if  
+}//end verificador_de_conexion
+
 uint8_t estado_de_red(){
   uint8_t network_status = fona.getNetworkStatus();
   if(network_status == 0){
-    // debug_print(F("WARNING"), F("Not registered"), true);
     Serial.println(F("Not registered"));
     return EXIT_FAILURE;
   }else if(network_status == 1){
-    // debug_print(F("STATUS"), F("Registered (home)"), true);
     Serial.println(F("Registered (home)"));
     return EXIT_SUCCESS;
   }else if(network_status == 2){
-    // debug_print(F("WARNING"), F("Not registered (searching)"), true);
     Serial.println(F("Not registered (searching)"));
     return EXIT_FAILURE;
   }else if(network_status == 3){
-    // debug_print(F("ERROR"), F("Denied"), true);
     Serial.println(F("Denied"));
     return EXIT_FAILURE;
   }else if(network_status == 4){
-    // debug_print(F("WARNING"), F("Unknown"), true);
     Serial.println(F("Unknown"));
     return EXIT_FAILURE;
   }else if(network_status == 5){
-    // debug_print(F("WARNING"), F("Registered roaming"), true);
     Serial.println(F("Registered roaming"));
     return EXIT_FAILURE;
   }//end if
 }//end estado_de_red
 
-void little_blink(int16_t t_delay){
+void conexion_fona_kolbi(){
+  //Inicar la conección a la red celular GPRS
+  fona.setGPRSNetworkSettings(F(FONA_APN), F(FONA_USERNAME), F(FONA_PASSWORD));
+  for(uint8_t i = 0; i < NETOWRK_CONCT_TRY; i++){
+    delay(5000);
+    if(estado_de_red() == EXIT_SUCCESS){
+      Serial.print(F("Conectado. Fortaleza de señal: "));
+      Serial.println(get_network_asu());
+      return;
+    }//end if
+  }//end for
+  Serial.println(F("No fue posible establecer la conexión"));
+  reboot(F("ERROR grave, reiniciando..."));
+}//end conexion_fona_kolbi()
+
+void iniciar_FONA(){
+  Serial.println(F("Inicializando FONA....(Puede tomar algunos segundos)"));
+  
+  fonaSS.begin(4800); // if you're using software serial
+  
+  if (! fona.begin(fonaSS)) {           // can also try fona.begin(Serial1) 
+    reboot(F("La FONA presentó problemas de comunicación. Reiniciando"));
+  }
+  
+  fonaSS.println("AT+CMEE=2");
+  Serial.println(F("FONA OK"));
+
+  Serial.println(F("Connectando a la red celular..."));
+  while (estado_de_red() == EXIT_FAILURE){
+   delay(500);//Reintentar en 500ms
+  }//end while
+
+  delay(5000);  //Esperar 5s para estabilizar FONA
+  
+  conexion_fona_kolbi();//Conectarse a red GPRS
+
+  Serial.println(F("Desabilitando GPRS"));
+  fona.enableGPRS(false);
+  
+  delay(5000);  //Esperar 5s para estabilizar FONA
+
+  Serial.println(F("Habilitando GPRS"));
+  if (!fona.enableGPRS(true)){
+    reboot(F("No es posible continuar, error al habilitar GPRS, reiniciando..."));
+  }
+  Serial.println(F("Conectado a Red Celular!"));
+  
+  MQTT_connect();//Conectarse a MQTT
+  if(conteo_de_fallos >= MAXFALLOS){
+    //Se llegó a la máxima cantidad de fallos por lo que se bloqueará el programa
+    //de esta forma el Watchdog entrará en acción y reiniciará nuestro programa
+    //para solucionar cualquier problema de conexión    
+    reboot(F("Máxima cantidad de fallos al conectar a MQTT"));
+  }//end if  
+  
+  
+}
+
+
+void reboot(const __FlashStringHelper *error){
+  Serial.println(error);
+  delay(1000);
+  Watchdog.enable(100);
+  Watchdog.reset();
+  while (1);//Este loop infinito correrá durante 100ms y el programa se reiniciará
+}//end
+
+void little_blink(int16_t t_delay, uint8_t num_blink){
   //Este método nos permitirá conocer si el Feather está intentando conectarse a Adafruit
   //En caso de que el LED se encuentre fijo indicará una conexión permanente
-  Watchdog.reset();
-  for(uint8_t i = 0; i < 4; i++){
+  for(uint8_t i = 0; i < num_blink; i++){
     digitalWrite(led_conexion_mqtt, LOW);
     delay(t_delay);
     digitalWrite(led_conexion_mqtt, HIGH);
     delay(t_delay);    
   }///end for
   digitalWrite(led_conexion_mqtt, LOW);
-  Watchdog.reset();
 }//end little_blink
-
-void conexion_fona_kolbi(){
-  //Inicar la conección a la red celular
-  while (! FONAconnect(F(FONA_APN), F(FONA_USERNAME), F(FONA_PASSWORD))) {
-    Serial.println("Retrying FONA");
-  }//end while
-}//end conexion_fona_kolbi()
-
-
-
-
-
-
-
 
 
