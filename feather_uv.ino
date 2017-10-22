@@ -76,7 +76,7 @@ void setup() {
 //  while (!Serial);//Iniciar el programa hasta que se habra el puerto serial
   Serial.println("Inicio de programa");
 
-  pinMode(OUTPUT, led_conexion_mqtt);
+  pinMode(led_conexion_mqtt, OUTPUT);
 
   //Un watchdog es un circuito aparte dentro del microncontrolador que verifica que nuestro\
   programa se encuentre corriende, si por algún motivo nuestro programa se detiene, este circuito\
@@ -88,11 +88,9 @@ void setup() {
                     y estamos por esperar 5s, debemos asegurarnos de poder esperar ese tiempo
   delay(5000);  //Se debe esperar unos momentos a que el SIM800 se estabilize
   Watchdog.reset();//Reiniciamos nuevamente el tiempo para poder continuar con el flujo del programa
-  
-  //Inicar la conección a la red celular
-  while (! FONAconnect(F(FONA_APN), F(FONA_USERNAME), F(FONA_PASSWORD))) {
-    Serial.println("Retrying FONA");
-  }
+
+  little_blink(150);//Indicador de inicio
+  conexion_fona_kolbi();
 
   Serial.println(F("Connected to Cellular!"));
   
@@ -116,6 +114,7 @@ void loop() {
 
   if(estado_conexion_mqtt){
     digitalWrite(led_conexion_mqtt, HIGH);
+    delay(500);
   }
 
   //La conexión debe temporizarse para no saturar el sitio de mensajes de forma inncesaria
@@ -281,38 +280,17 @@ void MQTT_connect(){
 
   if(!estado_conexion_mqtt){
     digitalWrite(led_conexion_mqtt, LOW);
-  }
-
-  uint8_t network_status = fona.getNetworkStatus();
-  if(network_status == 0){
-    // debug_print(F("WARNING"), F("Not registered"), true);
-    Serial.println(F("Not registered"));
-//    return EXIT_FAILURE;
-  }else if(network_status == 1){
-    // debug_print(F("STATUS"), F("Registered (home)"), true);
-    Serial.println(F("Registered (home)"));
-//    return EXIT_SUCCESS;
-  }else if(network_status == 2){
-    // debug_print(F("WARNING"), F("Not registered (searching)"), true);
-    Serial.println(F("Not registered (searching)"));
-//    return EXIT_FAILURE;
-  }else if(network_status == 3){
-    // debug_print(F("ERROR"), F("Denied"), true);
-    Serial.println(F("Denied"));
-//    return EXIT_FAILURE;
-  }else if(network_status == 4){
-    // debug_print(F("WARNING"), F("Unknown"), true);
-    Serial.println(F("Unknown"));
-//    return EXIT_FAILURE;
-  }else if(network_status == 5){
-    // debug_print(F("WARNING"), F("Registered roaming"), true);
-    Serial.println(F("Registered roaming"));
-//    return EXIT_FAILURE;
   }//end if
+
   
   Serial.print("Connecting to MQTT... ");
 
   for(uint8_t i = 0; i < 10; i++){//Arbitrary elected 10 times
+    if(estado_de_red == EXIT_FAILURE){
+      Watchdog.reset();
+      conexion_fona_kolbi();
+      Watchdog.reset();  
+    }//end if
     if((connection_status = mqtt.connect()) == 0){//connect will return 0 for connected
         Serial.println("MQTT Connected!");
         estado_conexion_mqtt = 1;
@@ -322,7 +300,7 @@ void MQTT_connect(){
       Serial.println(mqtt.connectErrorString(connection_status));
       Serial.println("Retrying MQTT connection in 5 seconds...");
       mqtt.disconnect();
-      little_blink();//Indicador de que tendrá que reintentar conectarse a MQTT
+      little_blink(500);//Indicador de que tendrá que reintentar conectarse a MQTT
       estado_conexion_mqtt = 0;
       conteo_de_fallos++;
       Watchdog.reset();
@@ -331,17 +309,55 @@ void MQTT_connect(){
   }//end for
 }//end MQTT_connect
 
-void little_blink(){
+uint8_t estado_de_red(){
+  uint8_t network_status = fona.getNetworkStatus();
+  if(network_status == 0){
+    // debug_print(F("WARNING"), F("Not registered"), true);
+    Serial.println(F("Not registered"));
+    return EXIT_FAILURE;
+  }else if(network_status == 1){
+    // debug_print(F("STATUS"), F("Registered (home)"), true);
+    Serial.println(F("Registered (home)"));
+    return EXIT_SUCCESS;
+  }else if(network_status == 2){
+    // debug_print(F("WARNING"), F("Not registered (searching)"), true);
+    Serial.println(F("Not registered (searching)"));
+    return EXIT_FAILURE;
+  }else if(network_status == 3){
+    // debug_print(F("ERROR"), F("Denied"), true);
+    Serial.println(F("Denied"));
+    return EXIT_FAILURE;
+  }else if(network_status == 4){
+    // debug_print(F("WARNING"), F("Unknown"), true);
+    Serial.println(F("Unknown"));
+    return EXIT_FAILURE;
+  }else if(network_status == 5){
+    // debug_print(F("WARNING"), F("Registered roaming"), true);
+    Serial.println(F("Registered roaming"));
+    return EXIT_FAILURE;
+  }//end if
+}//end estado_de_red
+
+void little_blink(int16_t t_delay){
   //Este método nos permitirá conocer si el Feather está intentando conectarse a Adafruit
   //En caso de que el LED se encuentre fijo indicará una conexión permanente
+  Watchdog.reset();
+  for(uint8_t i = 0; i < 4; i++){
+    digitalWrite(led_conexion_mqtt, LOW);
+    delay(t_delay);
+    digitalWrite(led_conexion_mqtt, HIGH);
+    delay(t_delay);    
+  }///end for
   digitalWrite(led_conexion_mqtt, LOW);
-  delay(200);
-  digitalWrite(led_conexion_mqtt, HIGH);
-  delay(200);
-  digitalWrite(led_conexion_mqtt, LOW);
+  Watchdog.reset();
 }//end little_blink
 
-
+void conexion_fona_kolbi(){
+  //Inicar la conección a la red celular
+  while (! FONAconnect(F(FONA_APN), F(FONA_USERNAME), F(FONA_PASSWORD))) {
+    Serial.println("Retrying FONA");
+  }//end while
+}//end conexion_fona_kolbi()
 
 
 
