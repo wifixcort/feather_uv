@@ -44,18 +44,26 @@ Adafruit_MQTT_Publish uv_index_feed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME 
 
 Adafruit_MQTT_Publish feather_battery_feed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/feather_battery");
 
+Adafruit_MQTT_Publish feather_asu_signal_feed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/feather_asu_signal");
+
 //Siempre que se haga una publicación y falle aumentaremos en 1 el contador
 //Si logra realizar una publicación reiniciaremos el contador a 0.
 uint8_t conteo_de_fallos = 0;
 
 #define MAXFALLOS 5 //Cantidad máxima de fallos que vamos a permitir antes de reiniciar el sistema
 
-//Último porcentaje de la batería tomado
+//Últimos valores de la batería y el sensor UV
 uint16_t ultima_medicion_de_bateria;
 
-uint32_t previousMillis_1 = 0;//Actualizar tiempo de último envío de batería
+uint16_t ultima_medicion_uv = 0;//Inicia en negativo para actualizar la medición a cero en caso\
+                                 que se haya reiniciado y tenga una medición vieja en io.adafruit.com
 
-float lecturas_uv_sensor;
+uint32_t previousMillis_1 = 0;//Actualizar tiempo de último envío de batería
+uint32_t previousMillis_2 = 0;//Actualizar tiempo de último envío de indice UV
+uint32_t previousMillis_3 = 0;//Actualizar tiempo de último envío de indice UV
+
+uint8_t led_conexion_mqtt = 13;
+uint8_t estado_conexion_mqtt = 0;
 
 void setup() {
   
@@ -65,14 +73,17 @@ void setup() {
   //DEBE SER COMENTADA UNA VEZ EL PROYECTO ESTÉ EN MARCHA
   //DE LO CONTRARIO EL PROGRAMA NO INICIARÁ
   //*********************************************************
-  while (!Serial);//Iniciar el programa hasta que se habra el puerto serial
+//  while (!Serial);//Iniciar el programa hasta que se habra el puerto serial
   Serial.println("Inicio de programa");
+
+  pinMode(OUTPUT, led_conexion_mqtt);
 
   //Un watchdog es un circuito aparte dentro del microncontrolador que verifica que nuestro\
   programa se encuentre corriende, si por algún motivo nuestro programa se detiene, este circuito\
   reiniciará nuestro microcontrolador ya que esto indica una posible falla. Por lo que su\
   contador debe reiniciarse cada 8s como máximo
 
+  Watchdog.enable(8000);
   Watchdog.reset();//Reiniciamos el Watchdog para ya que si sobrepasa los 8s reinicia el programa\
                     y estamos por esperar 5s, debemos asegurarnos de poder esperar ese tiempo
   delay(5000);  //Se debe esperar unos momentos a que el SIM800 se estabilize
@@ -84,38 +95,37 @@ void setup() {
   }
 
   Serial.println(F("Connected to Cellular!"));
-
-  Watchdog.reset();
-  delay(5000);  
-  Watchdog.reset();  
   
 }//end setup
 
 void loop() {
   Watchdog.reset();//Siempre reinicar al inicio o al final de cada loop el watchdog
 
-  //TODO Crear método para enviar las mediciones con estos datos a MQTT
-//  float lecturas_Volts = lecturas_V_sensor_UV();
-//  unsigned int indice = indice_UV(lecturas_Volts);
-//  Serial.print(F("Indice de radiación UV = "));
-//  Serial.println(indice);
-//  delay(1000);//Esperar un segundo hasta la siguiente medición
-
   MQTT_connect();
   //Envío de prueba para verificar que se puede realizar la conexión a io.adadfruit.com
   //log_battery_percent(80, feather_battery_feed);//Tratar de enviar el mensaje por MQTT
-
-  //La conexión debe temporizarse para no saturar el sitio de mensajes de forma inncesaria
-  alarma1_enviar_bateria(millis(), 60000);//Actualizar Adafruit feeds cada 60s
-
+  
   if(conteo_de_fallos >= MAXFALLOS){
     //Se llegó a la máxima cantidad de fallos por lo que se bloqueará el programa
     //de esta forma el Watchdog entrará en acción y reiniciará nuestro programa
     //para solucionar cualquier problema de conexión
-    while(1);
+    Watchdog.enable(100);
+    Watchdog.reset();
+    while(1);//Este loop infinito correrá durante 100ms y el programa se reiniciará
   }//end if
+
+  if(estado_conexion_mqtt){
+    digitalWrite(led_conexion_mqtt, HIGH);
+  }
+
+  //La conexión debe temporizarse para no saturar el sitio de mensajes de forma inncesaria
+  alarma1_enviar_bateria(millis(), 60000);//Actualizar Adafruit feeds cada 60s
+  alarma2_enviar_indice_uv(millis(), 60000);//Actualizar Adafruit feeds cada 60s
+  alarma3_enviar_asu_signal(millis(), 30000);//Actualizar Adafruit feeds cada 60s
   
 }//end loop
+
+//===============================================================
 
 float lecturas_V_sensor_UV(){//Las lecturas deben retornarse en Volts
   /*Este médoto convierte el muestreo realizado por el pin analógico del sensor
@@ -151,15 +161,40 @@ unsigned int get_indice_UV(float &lectura_V){//El valor se envia por referencia 
   return indice_uv;
 }//end indice
 
-void log_indice_uv(){}
-
 int get_fona_battery(void){//Leer el porcentaje de la batería restante
   uint16_t vbat;
   fona.getBattPercent(&vbat);
   return vbat;
 }//end get_fona_battery
 
+int8_t get_network_asu(void){
+  //Arbitrary Strength Unit (ASU) is an integer value proportional to the received signal strength measured by the mobile phone.
+  uint8_t asu = fona.getRSSI();
+
+  #if defined(DEBUG)
+    int8_t r;
+    if(asu == 0){
+      r = -115;
+    }else if(asu == 1){
+      r = -111;
+    }else if(asu == 31){
+      r = -52;
+    }else if ((asu >= 2) && (asu <= 30)){
+      r = map(asu, 2, 30, -110, -54);
+    }//end if
+    char str_rssi[25];
+    sprintf(str_rssi, "RSSI = %i: %i dBm", asu, r);
+//    Serial.println(str_rssi);
+//     serial.print(F("RSSI = ")); serial.print(asu); serial.print(": ");
+//     serial.print(r); serial.println(F(" dBm"));
+  #endif
+  return asu;
+}//end get_network_asu
+
+//===============================================================
+
 void alarma1_enviar_bateria(uint32_t timer, uint32_t interval){
+  if(timer - previousMillis_1 > interval) {
     uint16_t fona_battery = get_fona_battery();//Tomar una medición reciente de la batería
 
     //Se verificará si el porcentaje es igual al último enviado, de ser así no se enviará nuevamente\
@@ -168,40 +203,151 @@ void alarma1_enviar_bateria(uint32_t timer, uint32_t interval){
       ultima_medicion_de_bateria = fona_battery;//Actualizar al último valor de batería 
       Serial.print(F("Publicando porcentaje de batería: "));
       Serial.println(fona_battery);
-      log_to_mqtt(fona_battery, feather_battery_feed);//Tratar de enviar el mensaje por MQTT
+      int verificacion_envio = log_to_mqtt(fona_battery, feather_battery_feed);//Tratar de enviar el mensaje por MQTT
+      //Si el envío no se realiza siempre voy a querer que cuando se vuelva a intentar realizar el envío
+      //el valor anterior y el nuevo valor no sean iguales para así enviarlo
+      if(verificacion_envio == EXIT_FAILURE){
+        ultima_medicion_de_bateria = 0;
+      }//end if      
+    }else{
+      //Esta línea se utilizará únicamente para propósitos de información
+      char buffer[60];
+      sprintf(buffer, "Medición duplicada de bateria: %i, no hay cambios", fona_battery);
+      Serial.println(buffer);
     }//end if
     previousMillis_1 = timer;
-}//end temporizer
+  }//end if
+}//end alarma1_enviar_bateria
 
-void log_to_mqtt(uint32_t indicador, Adafruit_MQTT_Publish& publishFeed){// Log battery
+void alarma2_enviar_indice_uv(uint32_t timer, uint32_t interval){
+  if(timer - previousMillis_2 > interval) {
+    float lecturas_Volts = lecturas_V_sensor_UV();
+    unsigned int uv_index = get_indice_UV(lecturas_Volts);
+//    if((uv_index != ultima_medicion_uv) && (uv_index != 0)){//El indice inicia en 1 por lo que no se\
+                                                              enviaran valores menores a 1
+      Serial.print(F("Publicando Indice de radiación UV: "));
+      Serial.println(uv_index);
+      int verificacion_envio = log_to_mqtt(uv_index, uv_index_feed);
+      //Si el envío no se realiza siempre voy a querer que cuando se vuelva a intentar realizar el envío
+      //el valor anterior y el nuevo valor no sean iguales para así enviarlo
+      if(verificacion_envio == EXIT_FAILURE){
+        ultima_medicion_uv = 0;
+      }//end if
+//    }else{
+//      //Esta línea se utilizará únicamente para propósitos de información
+//      char buffer[60];
+//      sprintf(buffer, "Medición duplicada UV: %i, no hay cambios", uv_index);
+//      Serial.println(buffer);
+//    }//end if
+    previousMillis_2 = timer;
+  }//end if
+}//end alarma2_enviar_indice_uv
+
+void alarma3_enviar_asu_signal(uint32_t timer, uint32_t interval){
+  if(timer - previousMillis_3 > interval) {
+    int32_t feather_asu_signal = get_network_asu();
+    Serial.print(F("Publicando señal ASU: "));
+    Serial.println(feather_asu_signal);
+    log_to_mqtt(feather_asu_signal, feather_asu_signal_feed);
+    previousMillis_3 = timer;
+  }//end if
+}//end alarma1_enviar_bateria
+
+//===============================================================
+
+unsigned int log_to_mqtt(int32_t indicador, Adafruit_MQTT_Publish& publishFeed){
+  //Método generalizado para enviar datos a mqtt, de esta forma no hay réplicas del mismo método\
+  simplifica el mantenimiento del programa
   if(!publishFeed.publish(indicador)){
     Serial.println(F("Publicación fallida!"));
     conteo_de_fallos++;
+    return EXIT_FAILURE;
   }else{
     Serial.println(F("Publicación OK!"));
     conteo_de_fallos = 0;
   }//end if
+  return EXIT_SUCCESS;
 }//end log_battery_percent
 
-
-//Método creado por Adafruit
-// Function to connect and reconnect as necessary to the MQTT server.
-// Should be called in the loop function and it will take care if connecting.
-void MQTT_connect() {
-  int8_t ret;
-
+void MQTT_connect(){
+  /* Function to connect and reconnect as necessary to the MQTT server.
+ Should be called in the loop function and it will take care if connecting.*/
+  int8_t connection_status;
   // Stop if already connected.
-  if (mqtt.connected()) {
+  if (mqtt.connected()){
+    estado_conexion_mqtt = 1;
     return;
+  }//end if
+
+  if(!estado_conexion_mqtt){
+    digitalWrite(led_conexion_mqtt, LOW);
   }
 
+  uint8_t network_status = fona.getNetworkStatus();
+  if(network_status == 0){
+    // debug_print(F("WARNING"), F("Not registered"), true);
+    Serial.println(F("Not registered"));
+//    return EXIT_FAILURE;
+  }else if(network_status == 1){
+    // debug_print(F("STATUS"), F("Registered (home)"), true);
+    Serial.println(F("Registered (home)"));
+//    return EXIT_SUCCESS;
+  }else if(network_status == 2){
+    // debug_print(F("WARNING"), F("Not registered (searching)"), true);
+    Serial.println(F("Not registered (searching)"));
+//    return EXIT_FAILURE;
+  }else if(network_status == 3){
+    // debug_print(F("ERROR"), F("Denied"), true);
+    Serial.println(F("Denied"));
+//    return EXIT_FAILURE;
+  }else if(network_status == 4){
+    // debug_print(F("WARNING"), F("Unknown"), true);
+    Serial.println(F("Unknown"));
+//    return EXIT_FAILURE;
+  }else if(network_status == 5){
+    // debug_print(F("WARNING"), F("Registered roaming"), true);
+    Serial.println(F("Registered roaming"));
+//    return EXIT_FAILURE;
+  }//end if
+  
   Serial.print("Connecting to MQTT... ");
 
-  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
-    Serial.println(mqtt.connectErrorString(ret));
-    Serial.println("Retrying MQTT connection in 5 seconds...");
-    mqtt.disconnect();
-    delay(5000);  // wait 5 seconds
-  }
-  Serial.println("MQTT Connected!");
-}
+  for(uint8_t i = 0; i < 10; i++){//Arbitrary elected 10 times
+    if((connection_status = mqtt.connect()) == 0){//connect will return 0 for connected
+        Serial.println("MQTT Connected!");
+        estado_conexion_mqtt = 1;
+        conteo_de_fallos = 0;
+      break;
+    }else{
+      Serial.println(mqtt.connectErrorString(connection_status));
+      Serial.println("Retrying MQTT connection in 5 seconds...");
+      mqtt.disconnect();
+      little_blink();//Indicador de que tendrá que reintentar conectarse a MQTT
+      estado_conexion_mqtt = 0;
+      conteo_de_fallos++;
+      Watchdog.reset();
+      delay(5000); // wait 5 seconds
+    }//end if
+  }//end for
+}//end MQTT_connect
+
+void little_blink(){
+  //Este método nos permitirá conocer si el Feather está intentando conectarse a Adafruit
+  //En caso de que el LED se encuentre fijo indicará una conexión permanente
+  digitalWrite(led_conexion_mqtt, LOW);
+  delay(200);
+  digitalWrite(led_conexion_mqtt, HIGH);
+  delay(200);
+  digitalWrite(led_conexion_mqtt, LOW);
+}//end little_blink
+
+
+
+
+
+
+
+
+
+
+
