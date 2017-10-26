@@ -254,6 +254,7 @@ void MQTT_connect(){
   int8_t connection_status;
 
   if (mqtt.connected()){//Salir si ya se está conectado a MQTT
+    digitalWrite(led_conexion_mqtt, HIGH);//
     return;
   }//end if
 
@@ -301,6 +302,8 @@ void verificador_de_conexion(){
   if(!fona.TCPconnected()){//Si no se tiene conexión por TCP no estaremos conectados a MQTT
     Serial.println(F("Fallo de conexión a MQTT, reconectando..."));
     MQTT_connect();//Reconectar a MQTT
+  }else{
+    digitalWrite(led_conexion_mqtt, HIGH);
   }//end if
   if(conteo_de_fallos >= MAXFALLOS){
     //Se llegó a la máxima cantidad de fallos por lo que se bloqueará el programa
