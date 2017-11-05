@@ -31,7 +31,7 @@ void setup() {
 
   pixels.begin(); // This initializes the NeoPixel library.
   pixels.setBrightness(80);
-  setLedIndex(1);
+  setLedIndex(11);
 }
 
 void loop() {
@@ -82,11 +82,11 @@ void setLedIndex(uint8_t _ledIndex){
 
     delay(delayval); // Delay for a period of time (in milliseconds).
     }    
-  }elseif(_ledIndex == 11){
+  }else if(_ledIndex == 11){
       for(int i= 0;i < NUMPIXELS;i++){
 
     // pixels.Color takes RGB values, from 0,0,0 up to 255,255,255
-    pixels.setPixelColor(i, ledIndex[10]); // Moderately bright green color.
+    pixels.setPixelColor(i, ledIndex[11]); // Moderately bright green color.
 
     pixels.show(); // This sends the updated pixel color to the hardware.
 
@@ -103,11 +103,11 @@ void setLedIndex(uint8_t _ledIndex){
 
     delay(delayval); // Delay for a period of time (in milliseconds).
     }
-  }else if(){
-      for(int i=0;i < NUMPIXELS;i++){
+  }else if(_ledIndex > 5){
+      for(int i=1;i <= _ledIndex-5 ;i++){
 
     // pixels.Color takes RGB values, from 0,0,0 up to 255,255,255
-    pixels.setPixelColor(i+1, ledIndex[5+i]); // Moderately bright green color.
+    pixels.setPixelColor(i-1, ledIndex[5+i]); // Moderately bright green color.
 
     pixels.show(); // This sends the updated pixel color to the hardware.
 
