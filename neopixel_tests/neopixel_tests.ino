@@ -9,8 +9,14 @@
 //Pin en el que se encuentran conectados los neopixeles
 #define LED_PIN            12
 
-// How many NeoPixels are attached to the Arduino?
+//Cantidad de Neipixeles
 #define NUMPIXELS      5
+
+#define BUTTON_PIN 11     // the number of the pushbutton pin
+#define SIGNAL_PIN  10
+
+// variables will change:
+int buttonState = 0;         // variable for reading the pushbutton status
 
 //Inicialización del objeto NeoPixel
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -21,13 +27,27 @@ int delayval = 500;//Intervalo para prender cada led
 int32_t ledIndex[15] = {0, 3302400, 65280, 16777010, 13158400, 16776960, 6566400, 6566400, 16724530, 13107200, 16711680, 13107400};
 
 void setup() {
+  //Inicialización de pines
+  pinMode(SIGNAL_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT);
+
+  digitalWrite(SIGNAL_PIN, HIGH);//Este pin es simplemente una señal en alto para el pin 11
   
   pixels.begin(); //Configuración inicial de los Neopixeles
   pixels.setBrightness(80);//Disminución del brillo
-  setLedIndex(11);//Establecimiento del indice de Radiación(Prueba de diseño)
 }
 
-void loop() {  
+void loop() {
+  // read the state of the pushbutton value:
+    buttonState = digitalRead(BUTTON_PIN);
+  // check if the pushbutton is pressed.
+  // if it is, the buttonState is HIGH:
+  if (buttonState == HIGH) {
+    setLedIndex(7);//Establecimiento del indice de Radiación(Prueba de diseño)
+  } else {
+    setLedIndex(0);//Apagar todos los neopixeles
+  }//end if
+    
 }
 
 void setLedIndex(uint8_t _ledIndex){
