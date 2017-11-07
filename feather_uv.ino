@@ -1,6 +1,12 @@
 
 //Sensor UV utilizado http://www.crcibernetica.com/electronic-brick-uv-sensor-brick/
 
+
+#include <Adafruit_NeoPixel.h>
+#ifdef __AVR__
+  #include <avr/power.h>
+#endif
+
 #include <Adafruit_SleepyDog.h>
 #include <SoftwareSerial.h>
 #include "Adafruit_FONA.h"
@@ -16,24 +22,26 @@
 #define FONA_RX  9
 #define FONA_TX  8
 #define FONA_RST 4
+
+/************************Neopixel Pins***********************************/
+//Pin en el que se encuentran conectados los neopixeles
+#define LED_PIN 12
+#define BUTTON_PIN 11 //Pin en el que se encuentra el botón
+#define SIGNAL_PIN  10
+
+//Se agregó una resistencia entre GND y el pin 11 para evitar ruidos
+
+#define NUMPIXELS 5 //Cantidad de Neipixeles
+
+
 SoftwareSerial fonaSS = SoftwareSerial(FONA_TX, FONA_RX);
 
 Adafruit_FONA fona = Adafruit_FONA(FONA_RST);
 
-/************ Global State (you don't need to change this!) ******************/
 
 // Inicialización de la clase MQTT_FONA que toma como argumentos la clase FONA
 //y los parámetros de configuración de MQTT 
 Adafruit_MQTT_FONA mqtt(&fona, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
-
-//Líneas de confuguración para el archivo fonahelper.cpp proporcionado por Adafruit
-
-// You don't need to change anything below this line!
-//#define halt(s) { Serial.println(F( s )); while(1);  }
-
-// FONAconnect is a helper function that sets up the FONA and connects to
-// the GPRS network. See the fonahelper.cpp tab above for the source!
-//boolean FONAconnect(const __FlashStringHelper *apn, const __FlashStringHelper *username, const __FlashStringHelper *password);
 
 /****************************** Feeds ***************************************/
 //Declaración y inicialización de los feeds que serán enviados por MQTT a io.adafruit.com
@@ -65,12 +73,21 @@ uint32_t previousMillis_2 = 0;//Actualizar tiempo de último envío de indice UV
 uint32_t previousMillis_3 = 0;//Actualizar tiempo de último envío de indice UV
 
 uint8_t led_conexion_mqtt = 13;
-//uint8_t estado_conexion_mqtt = 0;
+
+int buttonState = 0;  //Variable para almacenar el estado del botón
+
+//Inicialización del objeto NeoPixel
+Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+int delayval = 250;//Intervalo para prender cada led
+
+//Array de colores en formato uint32_t que indican el indice de radiación
+int32_t ledIndex[15] = {0, 3302400, 65280, 16777010, 13158400, 16776960, 6566400, 6566400, 16724530, 13107200, 16711680, 13107400};
+
 
 void little_blink(int16_t t_delay, uint8_t num_blink = 4);
 
-void setup() {
-  
+void setup() {  
   Serial.begin(115200);
   //*********************************************************
   //La siguiente línea es solo para propósitos de desarrollo
@@ -79,8 +96,16 @@ void setup() {
   //*********************************************************
 //  while (!Serial);//Iniciar el programa hasta que se habra el puerto serial
   Serial.println("Inicio de programa");
-
+  
+  //Inicialización de pines
   pinMode(led_conexion_mqtt, OUTPUT);
+  pinMode(SIGNAL_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT);
+
+  digitalWrite(SIGNAL_PIN, HIGH);//Este pin es simplemente una señal en alto para el pin 11
+  
+  pixels.begin(); //Configuración inicial de los Neopixeles
+  pixels.setBrightness(80);//Disminución del brillo
 
   /*Un watchdog es un circuito aparte dentro del microncontrolador que verifica que nuestro
   programa se encuentre corriende, si por algún motivo nuestro programa se detiene, este circuito
@@ -101,6 +126,16 @@ void loop() {
   alarma1_enviar_bateria(millis(), 60000);//Actualizar Adafruit feeds cada 60s
   alarma2_enviar_indice_uv(millis(), 60000);//Actualizar Adafruit feeds cada 60s
   alarma3_enviar_asu_signal(millis(), 30000);//Actualizar Adafruit feeds cada 60s
+
+  buttonState = digitalRead(BUTTON_PIN);//Leer el estado del botón
+  if (buttonState == HIGH){//Verificar si el botón se encuentra presionado
+    float lecturas_Volts = lecturas_V_sensor_UV();
+    unsigned int uv_index = get_indice_UV(lecturas_Volts);    
+    setLedIndex(uv_index);//Establecimiento del indice de Radiación(Prueba de diseño)
+  }else{//Si el botón no está presionado, apagar los leds
+    setLedIndex(0);//Apagar todos los neopixeles
+  }//end if
+
   
 }//end loop
 
@@ -415,4 +450,34 @@ void little_blink(int16_t t_delay, uint8_t num_blink){
   digitalWrite(led_conexion_mqtt, LOW);
 }//end little_blink
 
+void setLedIndex(uint8_t _ledIndex){
+  if(_ledIndex == 0){
+    for(int i= 0;i < NUMPIXELS;i++){
+      // pixels.Color toma valores RGB en formato uint32_t
+      //adafruit originalmente diseño un método para convertir de RGB a uint32_t
+      //pero no es necesario utilizarlo y en este caso es mejor utilizar colores ya convertidos
+      pixels.setPixelColor(i, ledIndex[0]);//Configurar el color a mostrar
+      pixels.show();//Actualizar el estado de los LEDs
+      delay(delayval);//Esperar algunos milisegundos para prender otro led
+    }//end for    
+  }else if(_ledIndex == 11){
+    for(int i= 0;i < NUMPIXELS;i++){
+      pixels.setPixelColor(i, ledIndex[11]);//Configurar el color a mostrar
+      pixels.show();//Actualizar el estado de los LEDs
+      delay(10);//Esperar algunos milisegundos para prender otro led
+    }//end for
+  }else if(_ledIndex <= 5){
+    for(int i=1;i < _ledIndex+1;i++){
+      pixels.setPixelColor(i-1, ledIndex[i]);//Configurar el color a mostrar
+      pixels.show();//Actualizar el estado de los LEDs
+      delay(delayval);//Esperar algunos milisegundos para prender otro led
+    }//end for
+  }else if(_ledIndex > 5){
+    for(int i=1;i <= _ledIndex-5 ;i++){
+      pixels.setPixelColor(i-1, ledIndex[5+i]);//Configurar el color a mostrar
+      pixels.show();//Actualizar el estado de los LEDs
+      delay(delayval);//Esperar algunos milisegundos para prender otro led
+    }//end for
+  }//end if
+}//end setLedIndex
 
