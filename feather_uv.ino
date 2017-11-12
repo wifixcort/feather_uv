@@ -130,8 +130,19 @@ void loop() {
   buttonState = digitalRead(BUTTON_PIN);//Leer el estado del botón
   if (buttonState == HIGH){//Verificar si el botón se encuentra presionado
     float lecturas_Volts = lecturas_V_sensor_UV();
-    unsigned int uv_index = get_indice_UV(lecturas_Volts);    
-    setLedIndex(uv_index);//Establecimiento del indice de Radiación(Prueba de diseño)
+    unsigned int uv_index = get_indice_UV(lecturas_Volts);
+    if(uv_index <= 5){
+      setLedIndex(uv_index);//Establecimiento del indice de Radiación(Prueba de diseño)
+    }else if(uv_index > 5){
+      //Esto permitirá ver una animación incremental en los leds
+      setLedIndex(5);//Establecimiento del indice de Radiación(Prueba de diseño)
+      setLedIndex(uv_index);//Establecimiento del indice de Radiación(Prueba de diseño)
+    }else{
+      //Esto permitirá ver una animación incremental en los leds
+      setLedIndex(5);//Establecimiento del indice de Radiación(Prueba de diseño)
+      setLedIndex(10);//Establecimiento del indice de Radiación(Prueba de diseño)
+      setLedIndex(uv_index);//Establecimiento del indice de Radiación(Prueba de diseño)            
+    }
   }else{//Si el botón no está presionado, apagar los leds
     setLedIndex(0);//Apagar todos los neopixeles
   }//end if
