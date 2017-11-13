@@ -136,11 +136,14 @@ void loop() {
     }else if(uv_index > 5){
       //Esto permitirá ver una animación incremental en los leds
       setLedIndex(5);//Establecimiento del indice de Radiación(Prueba de diseño)
+      setLedIndex(0);//Establecimiento del indice de Radiación(Prueba de diseño)
       setLedIndex(uv_index);//Establecimiento del indice de Radiación(Prueba de diseño)
     }else{
       //Esto permitirá ver una animación incremental en los leds
       setLedIndex(5);//Establecimiento del indice de Radiación(Prueba de diseño)
+      setLedIndex(0);//Establecimiento del indice de Radiación(Prueba de diseño)
       setLedIndex(10);//Establecimiento del indice de Radiación(Prueba de diseño)
+      setLedIndex(0);//Establecimiento del indice de Radiación(Prueba de diseño)
       setLedIndex(uv_index);//Establecimiento del indice de Radiación(Prueba de diseño)            
     }
   }else{//Si el botón no está presionado, apagar los leds
